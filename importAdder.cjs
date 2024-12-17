@@ -3,10 +3,20 @@ export default function transformer(file, api) {
     const root = j(file.source);
 
     // The import path and named imports to add
-    const importPath = './myModule'; // Replace with your file path
-    const namedImportsToAdd = ['myFunction', 'myConstant']; // Replace with the imports you need
+    const importPath = 'exampleFiles/slices/exampleOneSlice'; // Replace with your file path
+    const namedImportsToAdd = ['selectOneStateValueOne', 'selectTwoStateValueOne']; // Replace with the imports you need
 
-    // Find existing import from the specific path
+    // Step 1: Check if any of the named imports are used in the file
+    const isNamedImportUsed = namedImportsToAdd.some((name) => {
+        return root.find(j.Identifier, { name }).size() > 0;
+    });
+
+    if (!isNamedImportUsed) {
+        // If none of the named imports are used, return the original file
+        return file.source;
+    }
+
+    // Step 2: Find existing import from the specific path
     const existingImport = root.find(j.ImportDeclaration, {
         source: { value: importPath },
     });

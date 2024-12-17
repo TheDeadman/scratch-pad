@@ -1,4 +1,3 @@
-import { useAppDispatch } from "@hooks/useAppDispatch";
 import React from "react";
 import { useContext } from "react"
 import { ExampleOneContext } from "../contexts/ExampleOneContext"
@@ -14,9 +13,7 @@ const ExampleComponentTwo = () => {
     }
 
     const someOtherHandler = () => {
-        dispatch(setStateValueTwo({
-            stringVal: ['testing', 'testingTwo']
-        }))
+        setStateValueTwo(['testing', 'testingTwo'])
     }
 
     const anythingHere = () => {
@@ -27,22 +24,21 @@ const ExampleComponentTwo = () => {
         console.log("TEST")
     }
     return (
-        (<div>
+        <div>
+
             <div>
                 {stateValueOne}<br />
                 {isStateValueOne}<br />
             </div>
             <div id="nested-test">
                 <button onClick={() => setStateValueOne('1234')}>Testing</button>
-                <button onClick={() => dispatch(setStateValueTwo({
-                    stringVal: ['1234', "testing"]
-                }))}>Testing</button>
+                <button onClick={() => setStateValueTwo(['1234', "testing"])}>Testing</button>
             </div>
             <div>
                 {stateValueTwo}<br />
             </div>
-        </div>)
-    );
+        </div>
+    )
 }
 
 export default ExampleComponentTwo
