@@ -4,8 +4,8 @@ export interface ExampleTwoState {
     stateValueOne: string | string[];
     stateValueTwo: string | string[];
     isStateValueOne: boolean;
-    setStateValueOne: (str: string) => void;
-    setStateValueTwo: (str: string) => void;
+    setStateValueOne: (str: string | string[]) => void;
+    setStateValueTwo: (str: string | string[]) => void;
 }
 
 export const ExampleTwoContext = createContext<ExampleTwoState>({
@@ -17,8 +17,8 @@ export const ExampleTwoContext = createContext<ExampleTwoState>({
 })
 
 const ExampleTwoProvider: FC<PropsWithChildren> = ({ children }) => {
-    const [stateValueOne, setStateValueOne] = useState('')
-    const [stateValueTwo, setStateValueTwo] = useState('')
+    const [stateValueOne, setStateValueOne] = useState<string | string[]>('')
+    const [stateValueTwo, setStateValueTwo] = useState<string | string[]>('')
     const [isStateValueOne, setIsStateValueOne] = useState(false)
 
     return (

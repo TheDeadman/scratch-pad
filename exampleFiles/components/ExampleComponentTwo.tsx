@@ -13,7 +13,7 @@ const ExampleComponentTwo = () => {
     }
 
     const someOtherHandler = () => {
-        setStateValueTwo('testing')
+        setStateValueTwo(['testing', 'testingTwo'])
     }
 
     return (
