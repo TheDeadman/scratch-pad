@@ -7,9 +7,9 @@ module.exports = function (fileInfo, api, options) {
     const root = j(fileInfo.source);
 
     // Parse options
-    const contextName = options.contextName || "ExampleContext";
-    const fieldToReplace = options.field || "fieldTwo";
-    const selectorName = options.selector || "selectFieldTwo";
+    const contextName = options.contextName || "ExampleOneContext";
+    const fieldToReplace = options.field || "stateValueOne";
+    const selectorName = options.selector || "selectOneStateValueOne";
 
     // Find the useContext call for the specified context
     const useContextDeclaration = root.find(j.VariableDeclaration).filter((path) => {
