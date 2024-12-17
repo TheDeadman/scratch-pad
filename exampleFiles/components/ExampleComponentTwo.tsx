@@ -23,6 +23,10 @@ const ExampleComponentTwo = () => {
                 {stateValueOne}<br />
                 {isStateValueOne}<br />
             </div>
+            <div id="nested-test">
+                <button onClick={() => setStateValueOne('1234')}>Testing</button>
+                <button onClick={() => setStateValueTwo(['1234', "testing"])}>Testing</button>
+            </div>
             <div>
                 {stateValueTwo}<br />
             </div>
