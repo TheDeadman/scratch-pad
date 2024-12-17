@@ -28,3 +28,10 @@ const ExampleOneSlice = createSlice({
 
 export const { setStateValueOne, setStateValueTwo } = ExampleOneSlice.actions;
 export default ExampleOneSlice.reducer;
+
+// @ts-ignore
+export const selectOneStateValueOne = (state: RootState) => state.ExampleOne.stateValueOne;
+// @ts-ignore
+export const selectOneStateValueTwo = (state: RootState) => state.ExampleOne.stateValueTwo;
+// @ts-ignore
+export const selectOneIsStateValueOne = (state: RootState) => state.ExampleOne.isStateValueOne;
