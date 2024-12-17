@@ -17,11 +17,11 @@ const ExampleOneSlice = createSlice({
     name: 'ExampleOne',
     initialState: initialExampleOneState,
     reducers: {
-        setStateValueOne: (state, action: PayloadAction<string | string[]>) => {
-            state.stateValueOne = action.payload
+        setStateValueOne: (state, action: PayloadAction<{ stringVal: string | string[] }>) => {
+            state.stateValueOne = action.payload.stringVal;
         },
-        setStateValueTwo: (state, action: PayloadAction<string | string[]>) => {
-            state.stateValueTwo = action.payload
+        setStateValueTwo: (state, action: PayloadAction<{ stringVal: string | string[] }>) => {
+            state.stateValueTwo = action.payload.stringVal;
         },
     },
 });
