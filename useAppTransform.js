@@ -1,22 +1,15 @@
-/**
- * A jscodeshift transform that:
- * 1. Detects references to `useAppSelector` or `useAppDispatch`.
- * 2. Ensures they are imported from "store/hooks".
- * 3. Removes them from all other imports.
- *
- * Usage:
- *   jscodeshift -t use-app-transform.js <fileOrDirectory>
- */
-
-module.exports = function (file, api) {
+module.exports = function (file, api, options) {
     const j = api.jscodeshift;
     const root = j(file.source);
 
-    // These are the hooks we care about:
-    const HOOKS = ['useAppSelector', 'useAppDispatch'];
+    // If you need TS parsing, either specify via CLI:
+    //   jscodeshift --parser=ts -t transform.ts file.ts
+    // or do:
+    //   const parser = options.parser || 'ts';
+    //   and then pass { parser } to jscodeshift calls, etc.
 
-    // Track usage of these hooks so we know whether to add them
-    let usedHooks = new Set();
+    const HOOKS = ['useAppSelector', 'useAppDispatch'];
+    const usedHooks = new Set();
 
     // 1. Find any usage of these hooks in the code (identifier references).
     root
@@ -27,7 +20,7 @@ module.exports = function (file, api) {
         });
 
     if (usedHooks.size === 0) {
-        // No references in this file; no changes to do
+        // No references in this file
         return file.source;
     }
 
@@ -36,37 +29,51 @@ module.exports = function (file, api) {
         const { node } = importPath;
         if (node.source.value !== 'store/hooks') {
             // Filter out specifiers that match our hooks
-            node.specifiers = node.specifiers
-                ? node.specifiers.filter(
+            if (node.specifiers && node.specifiers.length > 0) {
+                node.specifiers = node.specifiers.filter(
                     (specifier) =>
                         !(
                             specifier.type === 'ImportSpecifier' &&
                             HOOKS.includes(specifier.imported.name)
                         )
-                )
-                : node.specifiers;
+                );
+            }
         }
     });
 
     // 3. Ensure that these hooks are imported from "store/hooks".
-    // Check if there's already an import from "store/hooks"
-    let storeHooksImport = root
-        .find(j.ImportDeclaration, { source: { value: 'store/hooks' } })
-        .at(0);
+    //    We search for any import declarations where
+    //    (source.value === 'store/hooks')
+    //    AND (importKind is 'value' or 'type' or not present).
+    let storeHooksImport = root.find(j.ImportDeclaration, (node) => {
+        return (
+            node.source.value === 'store/hooks' &&
+            (
+                // If importKind isn't present, or is 'value' or 'type'
+                node.importKind === undefined ||
+                node.importKind === 'value' ||
+                node.importKind === 'type'
+            )
+        );
+    });
 
-    if (!storeHooksImport.size()) {
+    if (storeHooksImport.size() === 0) {
         // If we don't find an existing import from "store/hooks", create it
+        // By default, we'll create a normal (value) import.
         const newImport = j.importDeclaration(
             [...usedHooks].map((h) => j.importSpecifier(j.identifier(h))),
             j.stringLiteral('store/hooks')
         );
-        // Insert at top of file
         root.get().node.program.body.unshift(newImport);
     } else {
         // If an import from "store/hooks" exists, add the missing specifiers
-        const storeHooksImportNode = storeHooksImport.get('node').value;
+        // Use `.nodes()` to avoid issues with `.get('node')`
+        const storeHooksImportNode = storeHooksImport.nodes()[0];
+        if (!storeHooksImportNode) {
+            return file.source; // Safety check: if there's truly no node, exit
+        }
 
-        // Safely default specifiers to an empty array if missing
+        // Ensure specifiers is at least an empty array
         storeHooksImportNode.specifiers = storeHooksImportNode.specifiers || [];
 
         // Build a set of already-imported identifiers
