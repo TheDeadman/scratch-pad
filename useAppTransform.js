@@ -36,12 +36,15 @@ module.exports = function (file, api) {
         const { node } = importPath;
         if (node.source.value !== 'store/hooks') {
             // Filter out specifiers that match our hooks
-            node.specifiers = node.specifiers.filter((specifier) => {
-                return !(
-                    specifier.type === 'ImportSpecifier' &&
-                    HOOKS.includes(specifier.imported.name)
-                );
-            });
+            node.specifiers = node.specifiers
+                ? node.specifiers.filter(
+                    (specifier) =>
+                        !(
+                            specifier.type === 'ImportSpecifier' &&
+                            HOOKS.includes(specifier.imported.name)
+                        )
+                )
+                : node.specifiers;
         }
     });
 
@@ -57,15 +60,18 @@ module.exports = function (file, api) {
             [...usedHooks].map((h) => j.importSpecifier(j.identifier(h))),
             j.stringLiteral('store/hooks')
         );
-        // Insert at top of file (or after any existing imports, your preference)
+        // Insert at top of file
         root.get().node.program.body.unshift(newImport);
     } else {
         // If an import from "store/hooks" exists, add the missing specifiers
-        const specifiers = storeHooksImport.get('node', 'specifiers').value;
+        const storeHooksImportNode = storeHooksImport.get('node').value;
+
+        // Safely default specifiers to an empty array if missing
+        storeHooksImportNode.specifiers = storeHooksImportNode.specifiers || [];
 
         // Build a set of already-imported identifiers
         const existingSpecifiers = new Set(
-            specifiers
+            storeHooksImportNode.specifiers
                 .filter((s) => s.type === 'ImportSpecifier')
                 .map((s) => s.imported.name)
         );
@@ -73,7 +79,7 @@ module.exports = function (file, api) {
         // For each used hook, if it's not in the import, add it
         usedHooks.forEach((hookName) => {
             if (!existingSpecifiers.has(hookName)) {
-                specifiers.push(j.importSpecifier(j.identifier(hookName)));
+                storeHooksImportNode.specifiers.push(j.importSpecifier(j.identifier(hookName)));
             }
         });
     }
