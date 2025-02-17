@@ -1,13 +1,3 @@
-
-//jscodeshift -t replace-context-with-redux.ts "src/**/*.tsx" \
-//--parser=tsx \
-//--contextImportPath="contexts/examples/ExampleContext" \
-//--reduxImportPath="exampleSlice.ts" \
-//--hooksImportPath="store/hooks" \
-//--contextValues="exampleValueOne,exampleValueTwo" \
-//--reduxSelectors='{"exampleValueOne":"selectExampleValueOne","exampleValueTwo":"selectExampleValueTwo"}'
-
-
 import { API, FileInfo, Options, JSCodeshift } from "jscodeshift";
 
 export default function transformer(
@@ -36,6 +26,7 @@ export default function transformer(
     }
 
     let contextRemoved = false;
+    const usedSelectors = new Set<string>();
 
     // Step 1: Find and modify `useContext` usage
     root.find(j.VariableDeclarator, {
@@ -44,9 +35,13 @@ export default function transformer(
     })
         .forEach(path => {
             const objectPattern = path.node.id as any;
-            const newProperties = objectPattern.properties.filter((prop: any) =>
-                !contextValuesToReplace.includes(prop.key.name)
-            );
+            const newProperties = objectPattern.properties.filter((prop: any) => {
+                if (contextValuesToReplace.includes(prop.key.name)) {
+                    usedSelectors.add(prop.key.name);
+                    return false;
+                }
+                return true;
+            });
 
             // If all properties are removed, remove the entire `useContext`
             if (newProperties.length === 0) {
@@ -58,39 +53,41 @@ export default function transformer(
         });
 
     // Step 2: Generate Redux `useAppSelector` calls
-    const useAppSelectorCalls = Object.entries(reduxSelectors).map(([contextVar, reduxSelector]) =>
-        j.variableDeclaration("const", [
+    const useAppSelectorCalls = Array.from(usedSelectors).map((contextVar) => {
+        return j.variableDeclaration("const", [
             j.variableDeclarator(
                 j.identifier(contextVar),
                 j.callExpression(
                     j.identifier("useAppSelector"),
-                    [j.identifier(reduxSelector)]
+                    [j.identifier(reduxSelectors[contextVar])]
                 )
             )
-        ])
-    );
+        ]);
+    });
 
     // Step 3: Insert Redux selectors
-    if (contextRemoved) {
-        // If `useContext` is fully removed, insert Redux selectors at the top of the function body
-        root.find(j.FunctionDeclaration).forEach(path => {
-            path.get('body', 'body').unshift(...useAppSelectorCalls);
-        });
-
-        root.find(j.ArrowFunctionExpression).forEach(path => {
-            if (path.parent.value.type === 'VariableDeclarator') {
-                path.parent.parent.value.declarations[0].init.body.body.unshift(...useAppSelectorCalls);
-            }
-        });
-    } else {
-        // Insert Redux selectors after first `useContext` call
-        root.find(j.VariableDeclaration)
-            .filter(path => path.value.declarations.some(decl =>
-                decl.init && decl.init.callee && decl.init.callee.name === "useContext"
-            ))
-            .forEach(path => {
-                j(path).insertAfter(useAppSelectorCalls);
+    if (usedSelectors.size > 0) {
+        if (contextRemoved) {
+            // If `useContext` is fully removed, insert Redux selectors at the top of the function body
+            root.find(j.FunctionDeclaration).forEach(path => {
+                path.get('body', 'body').unshift(...useAppSelectorCalls);
             });
+
+            root.find(j.ArrowFunctionExpression).forEach(path => {
+                if (path.parent.value.type === 'VariableDeclarator') {
+                    path.parent.parent.value.declarations[0].init.body.body.unshift(...useAppSelectorCalls);
+                }
+            });
+        } else {
+            // Insert Redux selectors after first `useContext` call
+            root.find(j.VariableDeclaration)
+                .filter(path => path.value.declarations.some(decl =>
+                    decl.init && decl.init.callee && decl.init.callee.name === "useContext"
+                ))
+                .forEach(path => {
+                    j(path).insertAfter(useAppSelectorCalls);
+                });
+        }
     }
 
     // Step 4: Update imports (remove old context references)
@@ -108,35 +105,39 @@ export default function transformer(
             }
         });
 
-    // Step 5: Ensure `useAppSelector` import exists
-    const existingHookImport = root.find(j.ImportDeclaration, {
-        source: { value: hooksImportPath }
-    });
+    // Step 5: Ensure `useAppSelector` import exists only if used
+    if (usedSelectors.size > 0) {
+        const existingHookImport = root.find(j.ImportDeclaration, {
+            source: { value: hooksImportPath }
+        });
 
-    if (existingHookImport.length === 0) {
-        root.get().node.program.body.unshift(
-            j.importDeclaration(
-                [j.importSpecifier(j.identifier("useAppSelector"))],
-                j.literal(hooksImportPath)
-            )
-        );
+        if (existingHookImport.length === 0) {
+            root.get().node.program.body.unshift(
+                j.importDeclaration(
+                    [j.importSpecifier(j.identifier("useAppSelector"))],
+                    j.literal(hooksImportPath)
+                )
+            );
+        }
     }
 
-    // Step 6: Ensure Redux selectors import exists
-    const reduxSelectorImports = Object.values(reduxSelectors).map(selector =>
-        j.importSpecifier(j.identifier(selector))
-    );
-
-    const existingReduxImport = root.find(j.ImportDeclaration, {
-        source: { value: reduxImportPath }
-    });
-
-    if (existingReduxImport.length === 0) {
-        root.get().node.program.body.unshift(
-            j.importDeclaration(reduxSelectorImports, j.literal(reduxImportPath))
+    // Step 6: Ensure Redux selectors import exists only if used
+    if (usedSelectors.size > 0) {
+        const reduxSelectorImports = Array.from(usedSelectors).map(contextVar =>
+            j.importSpecifier(j.identifier(reduxSelectors[contextVar]))
         );
-    } else {
-        existingReduxImport.get().node.specifiers.push(...reduxSelectorImports);
+
+        const existingReduxImport = root.find(j.ImportDeclaration, {
+            source: { value: reduxImportPath }
+        });
+
+        if (existingReduxImport.length === 0) {
+            root.get().node.program.body.unshift(
+                j.importDeclaration(reduxSelectorImports, j.literal(reduxImportPath))
+            );
+        } else {
+            existingReduxImport.get().node.specifiers.push(...reduxSelectorImports);
+        }
     }
 
     return root.toSource();
