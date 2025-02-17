@@ -61,20 +61,28 @@ export default function transformer(file, api, options) {
 
   // Step 3: Insert Redux selectors **only at the top level of the component**
   if (usedSelectors.size > 0) {
-    root.find(j.FunctionDeclaration)
-      .forEach(path => {
-        const body = path.get('body', 'body');
-        const firstNonImportIndex = body.value.findIndex(node => node.type !== "ImportDeclaration");
-        body.value.splice(firstNonImportIndex, 0, ...useAppSelectorCalls);
-      });
+    root.find(j.FunctionDeclaration).forEach(path => {
+      if (path.value.body && path.value.body.type === "BlockStatement") {
+        const firstNonImportIndex = path.value.body.body.findIndex(node => node.type !== "ImportDeclaration");
+        if (firstNonImportIndex !== -1) {
+          path.value.body.body.splice(firstNonImportIndex, 0, ...useAppSelectorCalls);
+        } else {
+          path.value.body.body.unshift(...useAppSelectorCalls);
+        }
+      }
+    });
 
     root.find(j.VariableDeclarator)
       .filter(path => path.parent.value.type === "VariableDeclaration" && path.parent.parent.value.type === "Program")
       .forEach(path => {
-        if (path.node.init && path.node.init.type === "ArrowFunctionExpression") {
+        if (path.node.init && path.node.init.type === "ArrowFunctionExpression" && path.node.init.body.type === "BlockStatement") {
           const body = path.node.init.body.body;
           const firstNonImportIndex = body.findIndex(node => node.type !== "ImportDeclaration");
-          body.splice(firstNonImportIndex, 0, ...useAppSelectorCalls);
+          if (firstNonImportIndex !== -1) {
+            body.splice(firstNonImportIndex, 0, ...useAppSelectorCalls);
+          } else {
+            body.unshift(...useAppSelectorCalls);
+          }
         }
       });
   }
