@@ -13,7 +13,7 @@ export default function transformer(file, api, options) {
   // Redux selectors mapping (context variable -> Redux selector)
   let reduxSelectors = {};
   try {
-    reduxSelectors = options.reduxSelectors || '{}';
+    reduxSelectors = JSON.parse(options.reduxSelectors || '{}');
   } catch (error) {
     console.error("Invalid JSON format for --reduxSelectors. Ensure it's properly escaped.");
     process.exit(1);
@@ -59,29 +59,24 @@ export default function transformer(file, api, options) {
     ]);
   });
 
-  // Step 3: Insert Redux selectors only if they were used
+  // Step 3: Insert Redux selectors **only at the top level of the component**
   if (usedSelectors.size > 0) {
-    if (contextRemoved) {
-      // If `useContext` is fully removed, insert Redux selectors at the top of the function body
-      root.find(j.FunctionDeclaration).forEach(path => {
-        path.get('body', 'body').unshift(...useAppSelectorCalls);
+    root.find(j.FunctionDeclaration)
+      .forEach(path => {
+        const body = path.get('body', 'body');
+        const firstNonImportIndex = body.value.findIndex(node => node.type !== "ImportDeclaration");
+        body.value.splice(firstNonImportIndex, 0, ...useAppSelectorCalls);
       });
 
-      root.find(j.ArrowFunctionExpression).forEach(path => {
-        if (path.parent.value.type === 'VariableDeclarator') {
-          path.parent.parent.value.declarations[0].init.body.body.unshift(...useAppSelectorCalls);
+    root.find(j.VariableDeclarator)
+      .filter(path => path.parent.value.type === "VariableDeclaration" && path.parent.parent.value.type === "Program")
+      .forEach(path => {
+        if (path.node.init && path.node.init.type === "ArrowFunctionExpression") {
+          const body = path.node.init.body.body;
+          const firstNonImportIndex = body.findIndex(node => node.type !== "ImportDeclaration");
+          body.splice(firstNonImportIndex, 0, ...useAppSelectorCalls);
         }
       });
-    } else {
-      // Insert Redux selectors after first `useContext` call
-      root.find(j.VariableDeclaration)
-        .filter(path => path.value.declarations.some(decl =>
-          decl.init && decl.init.callee && decl.init.callee.name === "useContext"
-        ))
-        .forEach(path => {
-          j(path).insertAfter(useAppSelectorCalls);
-        });
-    }
   }
 
   // Step 4: Update imports (remove old context references)
