@@ -27,9 +27,17 @@ export default function transformer(
     const contextValuesToReplace: string[] = (options.contextValues || '').split(',').map(v => v.trim());
 
     // Redux selectors mapping (context variable -> Redux selector)
-    const reduxSelectors: Record<string, string> = JSON.parse(options.reduxSelectors || '{}');
+    let reduxSelectors: Record<string, string> = {};
+    try {
+        reduxSelectors = JSON.parse(options.reduxSelectors || '{}');
+    } catch (error) {
+        console.error("Invalid JSON format for --reduxSelectors. Ensure it's properly escaped.");
+        process.exit(1);
+    }
 
-    // Step 1: Find `useContext` usage
+    let contextRemoved = false;
+
+    // Step 1: Find and modify `useContext` usage
     root.find(j.VariableDeclarator, {
         id: { type: 'ObjectPattern' },
         init: { callee: { name: 'useContext' } }
@@ -40,15 +48,16 @@ export default function transformer(
                 !contextValuesToReplace.includes(prop.key.name)
             );
 
-            // If no properties remain, remove the entire declaration
+            // If all properties are removed, remove the entire `useContext`
             if (newProperties.length === 0) {
                 j(path).remove();
+                contextRemoved = true;
             } else {
                 objectPattern.properties = newProperties;
             }
         });
 
-    // Step 2: Add Redux `useAppSelector` calls, preserving TypeScript type annotations
+    // Step 2: Generate Redux `useAppSelector` calls
     const useAppSelectorCalls = Object.entries(reduxSelectors).map(([contextVar, reduxSelector]) =>
         j.variableDeclaration("const", [
             j.variableDeclarator(
@@ -61,26 +70,45 @@ export default function transformer(
         ])
     );
 
-    // Insert Redux selector calls after the first useContext call
-    root.find(j.VariableDeclaration)
-        .filter(path => path.value.declarations.some(decl =>
-            decl.init && decl.init.callee && decl.init.callee.name === "useContext"
-        ))
-        .forEach(path => {
-            j(path).insertAfter(useAppSelectorCalls);
+    // Step 3: Insert Redux selectors
+    if (contextRemoved) {
+        // If `useContext` is fully removed, insert Redux selectors at the top of the function body
+        root.find(j.FunctionDeclaration).forEach(path => {
+            path.get('body', 'body').unshift(...useAppSelectorCalls);
         });
 
-    // Step 3: Update imports by removing old context references
+        root.find(j.ArrowFunctionExpression).forEach(path => {
+            if (path.parent.value.type === 'VariableDeclarator') {
+                path.parent.parent.value.declarations[0].init.body.body.unshift(...useAppSelectorCalls);
+            }
+        });
+    } else {
+        // Insert Redux selectors after first `useContext` call
+        root.find(j.VariableDeclaration)
+            .filter(path => path.value.declarations.some(decl =>
+                decl.init && decl.init.callee && decl.init.callee.name === "useContext"
+            ))
+            .forEach(path => {
+                j(path).insertAfter(useAppSelectorCalls);
+            });
+    }
+
+    // Step 4: Update imports (remove old context references)
     root.find(j.ImportDeclaration)
         .forEach(path => {
             if (path.node.source.value === contextImportPath) {
                 path.node.specifiers = path.node.specifiers.filter(specifier =>
                     specifier.imported && !contextValuesToReplace.includes(specifier.imported.name)
                 );
+
+                // If import is empty, remove it
+                if (path.node.specifiers.length === 0) {
+                    j(path).remove();
+                }
             }
         });
 
-    // Step 4: Ensure `useAppSelector` import exists
+    // Step 5: Ensure `useAppSelector` import exists
     const existingHookImport = root.find(j.ImportDeclaration, {
         source: { value: hooksImportPath }
     });
@@ -94,7 +122,7 @@ export default function transformer(
         );
     }
 
-    // Step 5: Ensure Redux selectors import exists
+    // Step 6: Ensure Redux selectors import exists
     const reduxSelectorImports = Object.values(reduxSelectors).map(selector =>
         j.importSpecifier(j.identifier(selector))
     );
