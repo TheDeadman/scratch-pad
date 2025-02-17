@@ -13,7 +13,7 @@ export default function transformer(file, api, options) {
   // Redux selectors mapping (context variable -> Redux selector)
   let reduxSelectors = {};
   try {
-    reduxSelectors = JSON.parse(options.reduxSelectors || '{}');
+    reduxSelectors = options.reduxSelectors || '{}';
   } catch (error) {
     console.error("Invalid JSON format for --reduxSelectors. Ensure it's properly escaped.");
     process.exit(1);
