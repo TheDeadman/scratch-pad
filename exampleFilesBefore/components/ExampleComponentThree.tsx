@@ -1,0 +1,31 @@
+import React, { memo } from "react";
+import { useContext } from "react"
+import { ExampleOneContext } from "../contexts/ExampleOneContext"
+
+
+const ExampleComponentThree = memo(() => {
+    const {
+        isStateValueOne,
+        stateValueOne,
+        setStateValueOne,
+        setStateValueTwo
+    } = useContext(ExampleOneContext);
+
+    const someHandler = () => {
+        setStateValueOne('testing')
+    }
+
+    return (
+        <div>
+            {stateValueOne}<br />
+            <div id="nested-test">
+                <button onClick={() => setStateValueOne('1234')}>Testing</button>
+                <button onClick={() => setStateValueTwo(['1234', "testing"])}>Testing</button>
+                <button onClick={() => someHandler()}>Other</button>
+            </div>
+            {isStateValueOne}<br />
+        </div>
+    )
+});
+
+export default ExampleComponentThree
