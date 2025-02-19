@@ -14,6 +14,7 @@ export function isSelectorFunctionFound(j, root, functionName) {
     } else {
         console.log("not found")
     }
+    return isFound;
 }
 
 export function isDispatchedFunctionFound(j, root, functionName) {
@@ -31,6 +32,30 @@ export function isDispatchedFunctionFound(j, root, functionName) {
     } else {
         console.log("not found")
     }
+    return isFound;
+}
+
+export function isContextUsageFound(j, root, contextName) {
+    let isFound = false;
+
+    root.find(j.VariableDeclarator, {
+        id: { type: 'ObjectPattern' },
+        init: { callee: { name: 'useContext' } }
+    })
+        .forEach(path => {
+
+            // Ensure that we found the Desired context
+            if (path.node.init.arguments[0]?.name === contextName) {
+                isFound = true
+            }
+        });
+
+    if (isFound) {
+        console.log("Found");
+    } else {
+        console.log("not found")
+    }
+    return isFound;
 }
 
 

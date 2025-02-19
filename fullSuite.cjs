@@ -1,8 +1,9 @@
 // jscodeshift -t ./fullSuite.cjs ./src --parser=tsx
 
-import { isNamedFunctionFound } from "./finderHelperFunctions";
-import { addSpecifierImport, dedupeAndSortImports } from "./importHelperFunctions";
-import { insertAtTopOfComponent } from "./insertHelperFunctions";
+import { findAndModifyUseContext } from "./helperFunctions/findAndModifyUseContext";
+import { isContextUsageFound, isNamedFunctionFound } from "./helperFunctions/finderHelperFunctions";
+import { addSpecifierImport, dedupeAndSortImports, removeNamedImport } from "./helperFunctions/importHelperFunctions";
+import { insertAtTopOfComponent } from "./helperFunctions/insertHelperFunctions";
 
 export default function transformer(file, api, options) {
   const j = api.jscodeshift;
@@ -15,7 +16,7 @@ export default function transformer(file, api, options) {
   const hooksImportPath = options.hooksImportPath || 'store/hooks';
 
   // Values to be replaced from context
-  const contextValuesToReplace = ['isStateValueOne', 'stateValueOne'];
+  const contextValuesToReplace = ['isStateValueOne', 'stateValueOne', 'stateValueTwo'];
   const contextSettersToReplace = ['setStateValueOne'];
   const setterArgumentUpdates = {
     setStateValueOne: ['textValue']
@@ -28,54 +29,23 @@ export default function transformer(file, api, options) {
     reduxSelectors = {
       isStateValueOne: 'selectOneIsStateValueOne',
       stateValueOne: 'selectOneStateValueOne',
+      stateValueTwo: 'selectTwoStateValueTwo'
     };
   } catch (error) {
     console.error("Invalid JSON format for --reduxSelectors. Ensure it's properly escaped.");
     process.exit(1);
   }
 
-  let contextRemoved = false;
   const usedSelectors = new Set();
   const usedSetters = new Set();
 
   // Step 1: Find and modify `useContext` usage
-  root.find(j.VariableDeclarator, {
-    id: { type: 'ObjectPattern' },
-    init: { callee: { name: 'useContext' } }
-  })
-    .forEach(path => {
-
-      // Ensure that we found the Desired context
-      if (path.node.init.arguments[0]?.name === contextName) {
-        const objectPattern = path.node.id;
-        const newProperties = objectPattern.properties.filter(prop => {
-          if (contextValuesToReplace.includes(prop.key.name)) {
-            usedSelectors.add(prop.key.name);
-            return false;
-          }
-          if (contextSettersToReplace.includes(prop.key.name)) {
-            usedSetters.add(prop.key.name);
-            return false;
-          }
-          return true;
-        });
-
-        // If all properties are removed, remove the entire `useContext`
-        if (newProperties.length === 0) {
-          objectPattern.properties = newProperties;
-          j(path).remove();
-          contextRemoved = true;
-        } else {
-          objectPattern.properties = newProperties;
-        }
-      }
-    });
-
-
+  findAndModifyUseContext(j, root, contextName, contextValuesToReplace, usedSelectors, contextSettersToReplace, usedSetters);
 
 
   // Step 2: Generate Redux `useAppSelector` calls only for found context variables. Insert the app selector calls
   const useAppSelectorCalls = Array.from(usedSelectors).map((contextVar) => {
+    console.log("CONTEXT VAR: ", contextVar)
     return j.variableDeclaration("const", [
       j.variableDeclarator(
         j.identifier(contextVar),
@@ -203,125 +173,16 @@ export default function transformer(file, api, options) {
   }
 
 
-  // // Step 7: Remove "useContext" if it is no longer used
-  // // Check if `useContext` is still being used in the file
-  // // TODO: Fix... not working
-  // const isUseContextUsed = root.find(j.Identifier, { name: 'useContext' }).size() > 1;
-  // // `.size() > 1` because one occurrence might be from the import itself
-
-  // if (isUseContextUsed) {
-  //   // return root.toSource(); // Exit early, keeping the import
-  // } else {
-  //   // Find all import declarations from 'react'
-  //   root.find(j.ImportDeclaration, { source: { value: 'react' } }).forEach(path => {
-  //     const specifiers = path.node.specifiers;
-
-  //     // Remove `useContext` from the named imports
-  //     const filteredSpecifiers = specifiers.filter(
-  //       specifier => !(j.ImportSpecifier.check(specifier) && specifier.imported.name === 'useContext')
-  //     );
-
-  //     if (filteredSpecifiers.length > 0) {
-  //       // Update the import statement with the remaining specifiers
-  //       path.node.specifiers = filteredSpecifiers;
-  //     } else {
-  //       // Remove the entire import if it's now empty
-  //       j(path).remove();
-  //     }
-  //   });
-  // }
+  // Step 7: Remove "useContext" if it is no longer used
+  if (!isNamedFunctionFound(j, root, 'useContext')) {
+    removeNamedImport(j, root, 'react', 'useContext')
+  }
 
 
-  // // Step 8: Remove the context import
-  // root.find(j.ImportDeclaration, { source: { value: contextImportPath } }).forEach(path => {
-  //   const specifiers = path.node.specifiers;
-
-  //   // Remove `useContext` from the named imports
-  //   const filteredSpecifiers = specifiers.filter(
-  //     specifier => !(j.ImportSpecifier.check(specifier) && specifier.imported.name === contextName)
-  //   );
-
-  //   if (filteredSpecifiers.length > 0) {
-  //     // Update the import statement with the remaining specifiers
-  //     path.node.specifiers = filteredSpecifiers;
-  //   } else {
-  //     // Remove the entire import if it's now empty
-  //     j(path).remove();
-  //   }
-  // });
-
-
-
-
-
-  // // Step 4: Update imports (remove old context references)
-  // root.find(j.ImportDeclaration)
-  //   .forEach(path => {
-  //     if (path.node.source.value === contextImportPath) {
-  //       path.node.specifiers = path.node.specifiers.filter(specifier =>
-  //         specifier.imported && !contextValuesToReplace.includes(specifier.imported.name)
-  //       );
-
-  //       // If import is empty, remove it
-  //       if (path.node.specifiers.length === 0) {
-  //         j(path).remove();
-  //       }
-  //     }
-  //   });
-
-  // // Step 5: Ensure `useAppSelector` import exists only if used
-  // if (usedSelectors.size > 0) {
-  //   const existingHookImport = root.find(j.ImportDeclaration, {
-  //     source: { value: hooksImportPath }
-  //   });
-
-  //   if (existingHookImport.length === 0) {
-  //     root.get().node.program.body.unshift(
-  //       j.importDeclaration(
-  //         [j.importSpecifier(j.identifier("useAppSelector"))],
-  //         j.literal(hooksImportPath)
-  //       )
-  //     );
-  //   }
-  // }
-
-  // // Step 6: Ensure Redux selectors import exists only if used
-  // if (usedSelectors.size > 0) {
-  //   const reduxSelectorImports = Array.from(usedSelectors).map(contextVar =>
-  //     j.importSpecifier(j.identifier(reduxSelectors[contextVar]))
-  //   );
-
-  //   const existingReduxImport = root.find(j.ImportDeclaration, {
-  //     source: { value: reduxImportPath }
-  //   });
-
-  //   if (existingReduxImport.length === 0) {
-  //     root.get().node.program.body.unshift(
-  //       j.importDeclaration(reduxSelectorImports, j.literal(reduxImportPath))
-  //     );
-  //   } else {
-  //     existingReduxImport.get().node.specifiers.push(...reduxSelectorImports);
-  //   }
-  // }
-
-  // Step 900: Remove the useContext if empty
-  root.find(j.VariableDeclarator, {
-    id: { type: 'ObjectPattern' },
-    init: { callee: { name: 'useContext' } }
-  })
-    .forEach(path => {
-
-      // Ensure that we found the Desired context
-      if (path.node.init.arguments[0]?.name === contextName) {
-        const objectPattern = path.node.id;
-
-        // If all properties are removed, remove the entire `useContext`
-        if (objectPattern.properties.length === 0) {
-          j(path).remove();
-          console.log("REMOVING CONTEXT");
-        }
-      }
-    });
+  // Step 8: Remove the context import
+  if (!isNamedFunctionFound(j, root, contextName) && !isContextUsageFound(j, root, contextName)) {
+    removeNamedImport(j, root, contextImportPath, contextName);
+  }
 
   return root.toSource({ reuseWhitespace: false, quote: 'single' });
 }

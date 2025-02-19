@@ -99,3 +99,22 @@ export function dedupeAndSortImports(j, root, importPath) {
         }).sort((a, b) => a.imported.name.localeCompare(b.imported.name));
     });
 }
+
+export function removeNamedImport(j, root, importPath, importName) {
+    root.find(j.ImportDeclaration, { source: { value: importPath } }).forEach(path => {
+        const specifiers = path.node.specifiers;
+
+        // Remove `useContext` from the named imports
+        const filteredSpecifiers = specifiers.filter(
+            specifier => !(j.ImportSpecifier.check(specifier) && specifier.imported.name === importName)
+        );
+
+        if (filteredSpecifiers.length > 0) {
+            // Update the import statement with the remaining specifiers
+            path.node.specifiers = filteredSpecifiers;
+        } else {
+            // Remove the entire import if it's now empty
+            j(path).remove();
+        }
+    });
+}
