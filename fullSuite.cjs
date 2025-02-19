@@ -1,9 +1,12 @@
 // jscodeshift -t ./fullSuite.cjs ./src --parser=tsx
 
+import { isNamedFunctionFound } from "./finderHelperFunctions";
+import { addSpecifierImport, dedupeAndSortImports } from "./importHelperFunctions";
+import { insertAtTopOfComponent } from "./insertHelperFunctions";
+
 export default function transformer(file, api, options) {
   const j = api.jscodeshift;
   const root = j(file.source);
-
 
   // Get options from the command line
   const contextImportPath = options.contextImportPath || '../contexts/ExampleOneContext';
@@ -22,7 +25,7 @@ export default function transformer(file, api, options) {
   // Redux selectors mapping (context variable -> Redux selector)
   let reduxSelectors = {};
   try {
-    reduxSelectors = options.reduxSelectors || {
+    reduxSelectors = {
       isStateValueOne: 'selectOneIsStateValueOne',
       stateValueOne: 'selectOneStateValueOne',
     };
@@ -62,14 +65,16 @@ export default function transformer(file, api, options) {
           objectPattern.properties = newProperties;
           j(path).remove();
           contextRemoved = true;
-          isUseContextEmpty = true;
         } else {
           objectPattern.properties = newProperties;
         }
       }
     });
 
-  // Step 2: Generate Redux `useAppSelector` calls only for found context variables
+
+
+
+  // Step 2: Generate Redux `useAppSelector` calls only for found context variables. Insert the app selector calls
   const useAppSelectorCalls = Array.from(usedSelectors).map((contextVar) => {
     return j.variableDeclaration("const", [
       j.variableDeclarator(
@@ -81,9 +86,11 @@ export default function transformer(file, api, options) {
       )
     ]);
   });
+  insertAtTopOfComponent(j, root, useAppSelectorCalls);
 
-  // Step 3: Insert Redux selectors and useAppDispatch **only at the top level of the component**
-  if (usedSelectors.size > 0) {
+
+  // Step 4: Generate Redux `dispatch` calls only for found context setters. Ensure useAppDispatch is at the top of the component
+  if (usedSetters) {
     const useAppDispatchDeclaration = j.variableDeclaration("const", [
       j.variableDeclarator(
         j.identifier('dispatch'),
@@ -93,78 +100,9 @@ export default function transformer(file, api, options) {
       )
     ]);
 
-    let newElements = [useAppDispatchDeclaration, ...useAppSelectorCalls];
-
-    // Handle inserting into function components
-    root.find(j.FunctionDeclaration).forEach(path => {
-      if (path.value.body && path.value.body.type === "BlockStatement" && path.parent.parent.value.type === "Program") {
-        // Remove the useAppDispatch call if found so that we can ensure that it is the first item inserted in the component.
-        j(path)
-          .find(j.VariableDeclaration)
-          .filter(declPath => declPath.value.declarations.some(d => d.init?.callee?.name === "useAppDispatch"))
-          .remove();
-
-        // Insert useAppDispatch and selectors
-        const firstNonImportIndex = path.value.body.body.findIndex(node => node.type !== "ImportDeclaration");
-        if (firstNonImportIndex !== -1) {
-          path.value.body.body.splice(firstNonImportIndex, 0, ...newElements);
-        } else {
-          path.value.body.body.unshift(...newElements);
-        }
-      }
-    });
-
-    // Handle inserting into arrow function components
-    root.find(j.VariableDeclarator)
-      .filter(path => path.parent.value.type === "VariableDeclaration" && path.parent.parent.value.type === "Program")
-      .forEach(path => {
-        if (path.node.init && path.node.init.type === "ArrowFunctionExpression" && path.node.init.body.type === "BlockStatement") {
-          const body = path.node.init.body.body
-          // Remove the useAppDispatch call if found so that we can ensure that it is the first item inserted in the component.
-          j(path)
-            .find(j.VariableDeclaration)
-            .filter(declPath => declPath.value.declarations.some(d => d.init?.callee?.name === "useAppDispatch"))
-            .remove();
-
-          // Insert useAppDispatch and selectors
-
-          const firstNonImportIndex = body.findIndex(node => node.type !== "ImportDeclaration");
-          if (firstNonImportIndex !== -1) {
-            body.splice(firstNonImportIndex, 0, ...newElements);
-          } else {
-            body.unshift(...newElements);
-          }
-
-        }
-      });
+    insertAtTopOfComponent(j, root, [useAppDispatchDeclaration]);
 
 
-    // Handle inserting into memoized components
-    root.find(j.VariableDeclarator)
-      .filter(path => path.parent.value.type === "VariableDeclaration" && path.parent.parent.value.type === "Program" && path.value.init?.callee?.name === "memo")
-      .forEach(path => {
-        if (path.node.init && path.node.init.type === "CallExpression") {
-          const body = path.node.init.arguments[0].body.body;
-
-          // Remove the useAppDispatch call if found so that we can ensure that it is the first item inserted in the component.
-          j(path)
-            .find(j.VariableDeclaration)
-            .filter(declPath => declPath.value.declarations.some(d => d.init?.callee?.name === "useAppDispatch"))
-            .remove();
-
-          // Insert useAppDispatch and selectors
-          const firstNonImportIndex = body.findIndex(node => node.type !== "ImportDeclaration");
-          if (firstNonImportIndex !== -1) {
-            body.splice(firstNonImportIndex, 0, ...newElements);
-          } else {
-            body.unshift(...newElements);
-          }
-        }
-      });
-  }
-
-  // Step 4: Generate Redux `dispatch` calls only for found context setters
-  if (usedSetters) {
     Array.from(usedSetters).forEach((contextVar) => {
       // Find all calls to `myFunction(...)`
       root.find(j.CallExpression, { callee: { name: contextVar } })
@@ -182,53 +120,29 @@ export default function transformer(file, api, options) {
               args = [j.objectExpression(props)];
             }
 
-            // let newExpression = path.parentPath.value.type === "ExpressionStatement" ? j.expressionStatement(
-            //   j.callExpression(
-            //     j.identifier("dispatch"),
-            //     [j.callExpression(j.identifier(contextVar), args)]
-            //   )
-            // ) : j.callExpression(
-            //   j.identifier("dispatch"),
-            //   [j.callExpression(j.identifier(contextVar), args)]
-            // );
-
             let newExpression = j.callExpression(
               j.identifier("dispatch"),
               [j.callExpression(j.identifier(contextVar), args)]
             );
 
             return [newExpression];
-          }); // Wrap in an array
+          });
         });
 
     });
   }
 
+
   // Step 5: Ensure `useAppSelector` and `useAppDispatch` import exists only if used
-  if (usedSelectors.size > 0 || usedSetters.size > 0) {
-    const existingHookImport = root.find(j.ImportDeclaration, {
-      source: { value: hooksImportPath }
-    });
-    // Remove existing import if it is present
-    existingHookImport.forEach(node => {
-      j(node).remove();
-    });
-
-    let importSpecifiers = [];
-    if (usedSelectors.size > 0) {
-      importSpecifiers.push(j.importSpecifier(j.identifier("useAppSelector")));
-    }
-    if (usedSetters.size > 0) {
-      importSpecifiers.push(j.importSpecifier(j.identifier("useAppDispatch")));
-    }
-
-    root.get().node.program.body.unshift(
-      j.importDeclaration(
-        importSpecifiers,
-        j.literal(hooksImportPath)
-      )
-    );
+  if (isNamedFunctionFound(j, root, 'useAppSelector')) {
+    addSpecifierImport(j, root, hooksImportPath, 'useAppSelector');
   }
+
+  if (isNamedFunctionFound(j, root, 'useAppDispatch')) {
+    addSpecifierImport(j, root, hooksImportPath, 'useAppDispatch');
+  }
+
+  dedupeAndSortImports(j, root, hooksImportPath)
 
   // Step 6: Import necessary selectors / setters
   if (usedSelectors.size > 0 || usedSetters.size > 0) {
@@ -274,7 +188,7 @@ export default function transformer(file, api, options) {
       });
     } else {
 
-      let imports = Array.from(usedSelectors).map(name => j.importSpecifier(j.identifier(name)))
+      let imports = Array.from(usedSelectors).map(name => j.importSpecifier(j.identifier(reduxSelectors[name])))
 
       imports = [...imports, ...Array.from(usedSetters).map(name => j.importSpecifier(j.identifier(name)))];
       // ✅ Create a new import statement if none exists
@@ -289,52 +203,52 @@ export default function transformer(file, api, options) {
   }
 
 
-  // Step 7: Remove "useContext" if it is no longer used
-  // Check if `useContext` is still being used in the file
-  // TODO: Fix... not working
-  const isUseContextUsed = root.find(j.Identifier, { name: 'useContext' }).size() > 1;
-  // `.size() > 1` because one occurrence might be from the import itself
+  // // Step 7: Remove "useContext" if it is no longer used
+  // // Check if `useContext` is still being used in the file
+  // // TODO: Fix... not working
+  // const isUseContextUsed = root.find(j.Identifier, { name: 'useContext' }).size() > 1;
+  // // `.size() > 1` because one occurrence might be from the import itself
 
-  if (isUseContextUsed) {
-    // return root.toSource(); // Exit early, keeping the import
-  } else {
-    // Find all import declarations from 'react'
-    root.find(j.ImportDeclaration, { source: { value: 'react' } }).forEach(path => {
-      const specifiers = path.node.specifiers;
+  // if (isUseContextUsed) {
+  //   // return root.toSource(); // Exit early, keeping the import
+  // } else {
+  //   // Find all import declarations from 'react'
+  //   root.find(j.ImportDeclaration, { source: { value: 'react' } }).forEach(path => {
+  //     const specifiers = path.node.specifiers;
 
-      // Remove `useContext` from the named imports
-      const filteredSpecifiers = specifiers.filter(
-        specifier => !(j.ImportSpecifier.check(specifier) && specifier.imported.name === 'useContext')
-      );
+  //     // Remove `useContext` from the named imports
+  //     const filteredSpecifiers = specifiers.filter(
+  //       specifier => !(j.ImportSpecifier.check(specifier) && specifier.imported.name === 'useContext')
+  //     );
 
-      if (filteredSpecifiers.length > 0) {
-        // Update the import statement with the remaining specifiers
-        path.node.specifiers = filteredSpecifiers;
-      } else {
-        // Remove the entire import if it's now empty
-        j(path).remove();
-      }
-    });
-  }
+  //     if (filteredSpecifiers.length > 0) {
+  //       // Update the import statement with the remaining specifiers
+  //       path.node.specifiers = filteredSpecifiers;
+  //     } else {
+  //       // Remove the entire import if it's now empty
+  //       j(path).remove();
+  //     }
+  //   });
+  // }
 
 
-  // Step 8: Remove the context import
-  root.find(j.ImportDeclaration, { source: { value: contextImportPath } }).forEach(path => {
-    const specifiers = path.node.specifiers;
+  // // Step 8: Remove the context import
+  // root.find(j.ImportDeclaration, { source: { value: contextImportPath } }).forEach(path => {
+  //   const specifiers = path.node.specifiers;
 
-    // Remove `useContext` from the named imports
-    const filteredSpecifiers = specifiers.filter(
-      specifier => !(j.ImportSpecifier.check(specifier) && specifier.imported.name === contextName)
-    );
+  //   // Remove `useContext` from the named imports
+  //   const filteredSpecifiers = specifiers.filter(
+  //     specifier => !(j.ImportSpecifier.check(specifier) && specifier.imported.name === contextName)
+  //   );
 
-    if (filteredSpecifiers.length > 0) {
-      // Update the import statement with the remaining specifiers
-      path.node.specifiers = filteredSpecifiers;
-    } else {
-      // Remove the entire import if it's now empty
-      j(path).remove();
-    }
-  });
+  //   if (filteredSpecifiers.length > 0) {
+  //     // Update the import statement with the remaining specifiers
+  //     path.node.specifiers = filteredSpecifiers;
+  //   } else {
+  //     // Remove the entire import if it's now empty
+  //     j(path).remove();
+  //   }
+  // });
 
 
 
