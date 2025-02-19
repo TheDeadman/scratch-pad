@@ -10,6 +10,7 @@ const useSomeHook = <T extends Number>(formProps: SomeProps<T>) => {
     } = useContext(ExampleOneContext);
 
     const getTheValues = useCallback(() => {
+        setStateValueOne('1234')
         return {
             isStateValueOne,
             stateValueOne

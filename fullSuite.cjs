@@ -58,9 +58,23 @@ export default function transformer(file, api, options) {
   });
   insertAtTopOfComponent(j, root, useAppSelectorCalls);
 
+  // Hack to ensure use app dispatch is there.
+  if (isNamedFunctionFound(j, root, 'dispatch')) {
+    const useAppDispatchDeclaration = j.variableDeclaration("const", [
+      j.variableDeclarator(
+        j.identifier('dispatch'),
+        j.callExpression(
+          j.identifier("useAppDispatch"), []
+        )
+      )
+    ]);
+
+    insertAtTopOfComponent(j, root, [useAppDispatchDeclaration]);
+  }
+
 
   // Step 4: Generate Redux `dispatch` calls only for found context setters. Ensure useAppDispatch is at the top of the component
-  if (usedSetters) {
+  if (usedSetters.size > 0) {
     const useAppDispatchDeclaration = j.variableDeclaration("const", [
       j.variableDeclarator(
         j.identifier('dispatch'),
